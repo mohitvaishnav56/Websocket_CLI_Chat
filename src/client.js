@@ -1,12 +1,17 @@
-
 import { WebSocket } from "ws";
 import readline from "node:readline";
 
-const username = process.argv[2];
-const room = process.argv[3] || "general";
+const username = process.argv[2]?.trim();
+const room = (process.argv[3] || "general").trim();
 
-if (!username) {
-  console.log("Usage: node client.js <username> [room]");
+if (!username || !/^[a-zA-Z0-9_-]+$/.test(username) || username.length > 20) {
+  console.log("Usage: node src/client.js <username> [room]");
+  console.log("Username must be 1-20 alphanumeric characters (or _, -).");
+  process.exit(1);
+}
+
+if (!/^[a-zA-Z0-9_-]+$/.test(room) || room.length > 30) {
+  console.log("Room must be 1-30 alphanumeric characters (or _, -).");
   process.exit(1);
 }
 
@@ -15,7 +20,7 @@ const ws = new WebSocket("ws://localhost:8080");
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
-  prompt: `${username}> `
+  prompt: `${username}> `,
 });
 
 function send(type, payload) {
@@ -39,7 +44,14 @@ ws.on("open", () => {
 });
 
 ws.on("message", (raw) => {
-  const { type, payload } = JSON.parse(raw.toString());
+  let data;
+  try {
+    data = JSON.parse(raw.toString());
+  } catch {
+    return;
+  }
+
+  const { type, payload } = data;
 
   if (type === "message") {
     if (typeof payload === "string") {
@@ -54,7 +66,7 @@ ws.on("message", (raw) => {
       `\n[PRIVATE] ${payload.from} → ${payload.to}: ${payload.text}`
     );
   } else if (type === "users") {
-    console.log("\nOnline in room:", payload.join(", "));
+    console.log("\nOnline in room:", Array.isArray(payload) ? payload.join(", ") : "");
   } else if (type === "system") {
     console.log(`\n[SYSTEM] ${payload}`);
   } else if (type === "error") {
@@ -75,7 +87,7 @@ rl.on("line", (line) => {
 
   if (input === "/users") {
     send("users", {});
-  } else if (input.startsWith("/msg ")) {
+  } else if (input.startsWith("/msg")) {
     const match = input.match(/^\/msg\s+(\S+)\s+(.+)$/);
 
     if (!match) {
@@ -83,14 +95,24 @@ rl.on("line", (line) => {
     } else {
       send("private", {
         to: match[1],
-        text: match[2]
+        text: match[2],
       });
     }
+  } else if (input.startsWith("/")) {
+    console.log(`Unknown command: ${input}`);
+    console.log("Available commands: /msg <user> <message>, /users, /quit");
   } else if (input) {
     send("group", { text: input });
   }
 
   rl.prompt();
+});
+
+rl.on("close", () => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.close();
+  }
+  process.exit(0);
 });
 
 ws.on("close", () => {

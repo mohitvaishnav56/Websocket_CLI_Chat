@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
-import { type } from "node:os";
+
 // create a webserver
 const wss = new WebSocketServer({ port: 8080 });
 const clients = new Map();
@@ -11,7 +11,7 @@ function send(ws, type, payload) {
     ws.send(JSON.stringify({ type, payload }));
 }
 
-// create the broadcase message service
+// create the broadcast message service
 function broadcast(room, message, exclude = null) {
   for (const [client, user] of clients) {
     if (
@@ -24,15 +24,19 @@ function broadcast(room, message, exclude = null) {
   }
 }
 
-// writting the connection
+// writing the connection
 wss.on("connection", (ws) => {
   ws.id = randomUUID();
   console.log("New Connection: ", ws.id);
 
+  ws.on("error", (err) => {
+    console.error(`Socket error (${ws.id}):`, err.message);
+  });
+
   ws.on("message", (raw) => {
     if (raw.length >= 4000) {
       send(ws, "error", "Message too large");
-      ws.close(1099, "Message too large");
+      ws.close(1009, "Message too large");
       return;
     }
 
@@ -42,9 +46,16 @@ wss.on("connection", (ws) => {
       msg = JSON.parse(raw.toString());
     } catch (error) {
       send(ws, "error", "Invalid Json");
+      return;
     }
-    //register a username and join a room
-    if (msg.type == "join") {
+
+    if (!msg || typeof msg !== "object") {
+      send(ws, "error", "Invalid message format");
+      return;
+    }
+
+    // register a username and join a room
+    if (msg.type === "join") {
       const username = msg.payload?.username?.trim();
       const room = msg.payload?.room?.trim();
 
@@ -53,11 +64,12 @@ wss.on("connection", (ws) => {
         username.length < 1 ||
         username.length > 20 ||
         typeof room !== "string" ||
+        room.length < 1 ||
         room.length > 30 ||
         !/^[a-zA-Z0-9_-]+$/.test(username) ||
         !/^[a-zA-Z0-9_-]+$/.test(room)
       ) {
-        send(ws, "error", "Invalide username or room");
+        send(ws, "error", "Invalid username or room");
         return;
       }
 
@@ -67,7 +79,7 @@ wss.on("connection", (ws) => {
 
       if (nameTaken) {
         send(ws, "error", "Username is already taken");
-        ws.close(1008, "Message too large");
+        ws.close(1008, "Username is already taken");
         return;
       }
 
@@ -94,11 +106,11 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    //group message
-    if (ws.type == "group") {
-      const test = msg.payload?.text;
+    // group message
+    if (msg.type === "group") {
+      const text = msg.payload?.text;
 
-      if (typeof text != "string" || !text.tim() || text.length > 2000) {
+      if (typeof text !== "string" || !text.trim() || text.length > 2000) {
         send(ws, "error", "Message must be 1–2000 characters");
         return;
       }
@@ -113,7 +125,7 @@ wss.on("connection", (ws) => {
     }
 
     // Personal message: /msg username hello
-    if (ws.type == "private") {
+    if (msg.type === "private") {
       const { to, text } = msg.payload ?? {};
       if (
         typeof to !== "string" ||
@@ -177,6 +189,5 @@ wss.on("connection", (ws) => {
     }
   });
 });
-
 
 console.log("Chat server listening on ws://localhost:8080");
